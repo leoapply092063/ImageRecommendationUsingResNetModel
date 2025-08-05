@@ -15,11 +15,17 @@ set(SOURCES
     main.cpp
 )
 
+# Add ONNX Runtime include directory
+include_directories(${CMAKE_SOURCE_DIR}/onnxruntime/include)
+
+# Add ONNX Runtime library directory
+link_directories(${CMAKE_SOURCE_DIR}/onnxruntime/lib)
+
 # Build target
 add_executable(resnet_simd ${SOURCES})
 
-# Link ONNX Runtime if available
-# (You must precompile or include it manually, this project assumes prebuilt wasm-compatible ONNX runtime)
+# Link ONNX Runtime statically
+target_link_libraries(resnet_simd onnxruntime)
 
 # Emscripten-specific flags
 set_target_properties(resnet_simd PROPERTIES

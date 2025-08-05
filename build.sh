@@ -12,6 +12,23 @@ cd emsdk
 source ./emsdk_env.sh
 cd "$PROJECT_DIR"
 
-# Build project
+# Clone and build ONNX Runtime for WASM
+git clone --recursive https://github.com/microsoft/onnxruntime.git || true
+cd onnxruntime
+
+./build.sh \
+  --config Release \
+  --build_wasm \
+  --parallel \
+  --skip_tests \
+  --cmake_extra_defines CMAKE_BUILD_TYPE=Release
+
+# Copy ONNX Runtime headers and library to a known location in your project
+cd "$PROJECT_DIR"
+mkdir -p onnxruntime/include onnxruntime/lib
+cp -r onnxruntime/include/onnxruntime onnxruntime/include/
+cp onnxruntime/build/wasm/Release/libonnxruntime.a onnxruntime/lib/
+
+# Build your project
 emcmake cmake .
 emmake make
