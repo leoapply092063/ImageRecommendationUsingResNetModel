@@ -1,19 +1,17 @@
 #!/bin/bash
+set -e
 
-set -e  # Exit on first error
+# Save current path
+PROJECT_DIR=$(pwd)
 
-# Step 1: Install Emscripten SDK (if not already installed)
-echo "Cloning and installing Emscripten SDK..."
+# Install Emscripten
 git clone https://github.com/emscripten-core/emsdk.git || true
 cd emsdk
 ./emsdk install latest
 ./emsdk activate latest
 source ./emsdk_env.sh
-cd ..
+cd "$PROJECT_DIR"
 
-# Step 2: Build using CMake + Make
-echo "Building project with Emscripten..."
+# Build project
 emcmake cmake .
 emmake make
-
-echo "Build completed successfully."
