@@ -17,75 +17,120 @@
   </style>
 </head>
 <body>
-  <div id="grid"></div>
-  <script>
-    const wasmModule = Module;
-    const staticFolder = '/static';
-    let allImages = [];
-    let alreadyShown = new Set();
+    <div id="grid"></div>
+    <script>
+        const wasmModule = Module;
+        const staticFolder = '/static';
+        let allImages = [];
+        let alreadyShown = new Set();
 
-    async function fetchImageList() {
-      const res = await fetch(staticFolder);
-      const html = await res.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const imageLinks = Array.from(doc.querySelectorAll('a'))
-        .map(a => a.getAttribute('href'))
-        .filter(href => href.match(/\.(jpg|jpeg|png|webp)$/i));
-      return imageLinks;
-    }
+        // Load available image names from /static/
+        async function fetchImageList() {
+            const res = await fetch(staticFolder);
+            const html = await res.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            return Array.from(doc.querySelectorAll('a'))
+                .map(a => a.getAttribute('href'))
+                .filter(href => href.match(/\.(jpg|jpeg|png|webp)$/i));
+        }
 
-    function shuffle(array) {
-      for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-      }
-      return array;
-    }
+        // Random shuffle
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
 
-    function displayImages(images, selected = null) {
-      const grid = document.getElementById('grid');
-      grid.innerHTML = '';
-      for (const img of images) {
-        const imgEl = document.createElement('img');
-        imgEl.src = staticFolder + '/' + img;
-        imgEl.className = 'img-item';
-        imgEl.onclick = () => onImageClick(img);
-        grid.appendChild(imgEl);
-      }
-    }
+        // Convert image to tensor and send to C++
+        function extractImageTensor(imagePath, callback) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 224;
+                canvas.height = 224;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 224, 224);
+                const rgba = ctx.getImageData(0, 0, 224, 224).data;
 
-    async function onImageClick(selectedImage) {
-      const similar = wasmModule.getSimilarImages(selectedImage);
-      const result = [];
-      result.push(selectedImage);
-      for (let i = 0; i < similar.length; ++i) {
-        const img = similar.get(i);
-        if (!alreadyShown.has(img)) result.push(img);
-      }
-      alreadyShown.add(selectedImage);
-      result.forEach(img => alreadyShown.add(img));
+                const tensor = new Float32Array(3 * 224 * 224);
+                for (let i = 0; i < 224 * 224; i++) {
+                    const r = rgba[i * 4] / 255;
+                    const g = rgba[i * 4 + 1] / 255;
+                    const b = rgba[i * 4 + 2] / 255;
 
-      // Grid placement: [0,1,2] top row, [3,4,5] bottom
-      displayImages(result);
-    }
+                    tensor[i] = (r - 0.485) / 0.229; // R
+                    tensor[i + 224 * 224] = (g - 0.456) / 0.224; // G
+                    tensor[i + 2 * 224 * 224] = (b - 0.406) / 0.225; // B
+                }
 
-    async function init() {
-      allImages = await fetchImageList();
-      const initList = allImages.map(i => i.replace(/^.*\//, ''));
-      wasmModule.initModel(initList);
+                const ptr = wasmModule._malloc(tensor.length * 4);
+                wasmModule.HEAPF32.set(tensor, ptr / 4);
+                wasmModule.extractFeatureForImage(ptr, imagePath);
+                wasmModule._free(ptr);
+                callback();
+            };
+            img.src = staticFolder + '/' + imagePath;
+        }
 
-      const random6 = shuffle([...allImages].filter(i => !alreadyShown.has(i))).slice(0, 6);
-      random6.forEach(i => alreadyShown.add(i));
-      displayImages(random6);
-    }
+        // Display images in grid
+        function displayImages(images) {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            images.forEach(img => {
+                const el = document.createElement('img');
+                el.src = staticFolder + '/' + img;
+                el.className = 'img-item';
+                el.onclick = () => onImageClick(img);
+                grid.appendChild(el);
+            });
+        }
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init);
-    } else {
-      init();
-    }
-  </script>
-  <script src="resnet_simd.js"></script>
+        // When user clicks image: get 5 most similar
+        function onImageClick(selectedImage) {
+            const result = [selectedImage];
+            const similar = wasmModule.getSimilarImages(selectedImage);
+            for (let i = 0; i < similar.length; ++i) {
+                const simImg = similar.get(i);
+                if (!alreadyShown.has(simImg)) {
+                    result.push(simImg);
+                }
+            }
+            result.forEach(name => alreadyShown.add(name));
+            displayImages(result);
+        }
+
+        // Entry point — extract features for each image first
+        async function init() {
+            wasmModule.loadModel();
+            allImages = await fetchImageList();
+            const queue = [...allImages];
+
+            const next = () => {
+                if (queue.length === 0) {
+                    const batch = shuffle([...allImages].filter(i => !alreadyShown.has(i))).slice(0, 6);
+                    batch.forEach(i => alreadyShown.add(i));
+                    displayImages(batch);
+                    return;
+                }
+                const img = queue.pop();
+                extractImageTensor(img, next);
+            };
+
+            next(); // begin feature extraction
+        }
+
+        // Start after DOM loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+
+    <script src="resnet_simd.js"></script>
 </body>
 </html>
