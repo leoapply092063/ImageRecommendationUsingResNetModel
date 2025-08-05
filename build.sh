@@ -12,6 +12,16 @@ cd emsdk
 source ./emsdk_env.sh
 cd "$PROJECT_DIR"
 
+
+# -------------------------------
+# Install CMake 3.28.3 locally
+# -------------------------------
+CMAKE_VERSION=3.28.3
+wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+export PATH=$PWD/cmake-${CMAKE_VERSION}-linux-x86_64/bin:$PATH
+
+
 # Clone and build ONNX Runtime for WASM
 git clone --recursive https://github.com/microsoft/onnxruntime.git || true
 cd onnxruntime
