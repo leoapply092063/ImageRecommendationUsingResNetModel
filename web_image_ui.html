@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Image Similarity Viewer</title>
+  <style>
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      max-width: 900px;
+      margin: auto;
+    }
+    .img-item {
+      width: 100%;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="grid"></div>
+  <script>
+    const wasmModule = Module;
+    const staticFolder = '/static';
+    let allImages = [];
+    let alreadyShown = new Set();
+
+    async function fetchImageList() {
+      const res = await fetch(staticFolder);
+      const html = await res.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const imageLinks = Array.from(doc.querySelectorAll('a'))
+        .map(a => a.getAttribute('href'))
+        .filter(href => href.match(/\.(jpg|jpeg|png|webp)$/i));
+      return imageLinks;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function displayImages(images, selected = null) {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+      for (const img of images) {
+        const imgEl = document.createElement('img');
+        imgEl.src = staticFolder + '/' + img;
+        imgEl.className = 'img-item';
+        imgEl.onclick = () => onImageClick(img);
+        grid.appendChild(imgEl);
+      }
+    }
+
+    async function onImageClick(selectedImage) {
+      const similar = wasmModule.getSimilarImages(selectedImage);
+      const result = [];
+      result.push(selectedImage);
+      for (let i = 0; i < similar.length; ++i) {
+        const img = similar.get(i);
+        if (!alreadyShown.has(img)) result.push(img);
+      }
+      alreadyShown.add(selectedImage);
+      result.forEach(img => alreadyShown.add(img));
+
+      // Grid placement: [0,1,2] top row, [3,4,5] bottom
+      displayImages(result);
+    }
+
+    async function init() {
+      allImages = await fetchImageList();
+      const initList = allImages.map(i => i.replace(/^.*\//, ''));
+      wasmModule.initModel(initList);
+
+      const random6 = shuffle([...allImages].filter(i => !alreadyShown.has(i))).slice(0, 6);
+      random6.forEach(i => alreadyShown.add(i));
+      displayImages(random6);
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  </script>
+  <script src="resnet_simd.js"></script>
+</body>
+</html>
